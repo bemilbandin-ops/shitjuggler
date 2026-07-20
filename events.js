@@ -1,3 +1,33 @@
+function installTrackingDiagnosticsToggle() {
+  const existingToggle = document.querySelector("#show-tracking-diagnostics");
+  if (existingToggle) {
+    return existingToggle;
+  }
+
+  const label = document.createElement("label");
+  label.className = "check-control debug-toggle";
+
+  const input = document.createElement("input");
+  input.id = "show-tracking-diagnostics";
+  input.type = "checkbox";
+  input.checked = true;
+  input.setAttribute("aria-controls", "detection-overlay");
+
+  const text = document.createElement("span");
+  text.textContent = "Show tracking diagnostics";
+
+  label.append(input, text);
+  const maskToggle = showMask.closest("label");
+  maskToggle?.insertAdjacentElement("afterend", label);
+  return input;
+}
+
+const showTrackingDiagnostics = installTrackingDiagnosticsToggle();
+const scopeLabel = document.querySelector(".scope-label");
+if (scopeLabel) {
+  scopeLabel.textContent = "Build step 10";
+}
+
 cameraButton.addEventListener("click", startCamera);
 playPauseButton.addEventListener("click", togglePlayback);
 restartButton.addEventListener("click", restartPlayback);
@@ -17,6 +47,7 @@ sampleColorButton.addEventListener("click", () => {
 });
 captureBackgroundButton.addEventListener("click", captureBackgroundReference);
 resetBackgroundButton.addEventListener("click", resetBackgroundReference);
+showTrackingDiagnostics.addEventListener("input", renderDetectionOverlay);
 
 [
   brightnessMethod,
@@ -112,6 +143,17 @@ window.shitJuggler = Object.freeze({
       sourceHeight: mediaView.videoHeight || 0,
       tracks: getCurrentTracksSnapshot(),
     };
+  },
+  getPerformanceState() {
+    return adaptivePerformance.getState();
+  },
+  getTrackingDiagnosticsVisible() {
+    return showTrackingDiagnostics.checked;
+  },
+  setTrackingDiagnosticsVisible(visible) {
+    showTrackingDiagnostics.checked = Boolean(visible);
+    renderDetectionOverlay();
+    return showTrackingDiagnostics.checked;
   },
 });
 
