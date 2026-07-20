@@ -43,7 +43,7 @@ mediaView.addEventListener("pause", () => {
 
   if (mediaState.source === "upload" && !mediaView.ended) {
     updateDetectionStatus(
-      "Detection paused",
+      "Tracking paused",
       "Continuous processing is stopped. Change a setting or seek to analyze one frame.",
       "Paused",
     );
@@ -54,7 +54,7 @@ mediaView.addEventListener("ended", () => {
   stopDetectionLoop();
   updateDetectionStatus(
     "Playback ended",
-    "Restart or seek to refresh detection.",
+    "Restart or seek to refresh tracking.",
     "Ended",
   );
 });
@@ -65,7 +65,7 @@ mediaView.addEventListener("seeking", () => {
   clearCurrentDetections({
     status: {
       title: "Seeking",
-      detail: "Waiting for the selected frame.",
+      detail: "Tracking history was cleared to prevent paths across unrelated frames.",
       stageText: "Seeking",
     },
   });
@@ -89,6 +89,7 @@ window.addEventListener("resize", resizeOverlayCanvas);
 
 window.addEventListener("pagehide", () => {
   stopDetectionLoop();
+  resetTrackingState("page-hidden");
   stopCameraStream();
   releaseUploadedVideo();
 });
@@ -100,7 +101,20 @@ window.shitJuggler = Object.freeze({
       methods: [...detection.methods],
     }));
   },
+  getCurrentTracks() {
+    return getCurrentTracksSnapshot();
+  },
+  getTrackingSnapshot() {
+    return {
+      source: mediaState.source,
+      mediaTime: Number.isFinite(mediaView.currentTime) ? mediaView.currentTime : 0,
+      sourceWidth: mediaView.videoWidth || 0,
+      sourceHeight: mediaView.videoHeight || 0,
+      tracks: getCurrentTracksSnapshot(),
+    };
+  },
 });
 
 updateControlOutputs();
 updateDetectionCount(0);
+stageDetectionCount.textContent = "0 tracked · 0 detected";
