@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A browser-based workspace for live and recorded juggling footage."
+    />
+    <title>ShitJuggler — Video Workspace</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="app-header">
+        <div>
+          <h1>ShitJuggler</h1>
+          <p>Live and recorded juggling footage in one browser workspace.</p>
+        </div>
+        <span class="scope-label">Build step 1</span>
+      </header>
+
+      <section class="workspace" aria-labelledby="source-heading">
+        <aside class="source-panel">
+          <div>
+            <p class="section-label">Video source</p>
+            <h2 id="source-heading">Choose footage</h2>
+            <p class="section-copy">
+              Start a live camera feed or load a video file from this device.
+            </p>
+          </div>
+
+          <div class="source-actions">
+            <button class="primary-action" id="camera-button" type="button">
+              Use live camera
+            </button>
+
+            <label class="secondary-action" for="video-upload">
+              Upload a video
+            </label>
+            <input id="video-upload" type="file" accept="video/*" />
+          </div>
+
+          <div class="source-status" aria-live="polite">
+            <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+            <div>
+              <p id="status-title">No source selected</p>
+              <p id="status-detail">Camera access requires HTTPS or localhost.</p>
+            </div>
+          </div>
+        </aside>
+
+        <div class="video-stage" id="video-stage">
+          <div class="empty-state" id="empty-state">
+            <div class="frame-mark" aria-hidden="true"></div>
+            <p>Select a camera or video file to begin.</p>
+          </div>
+          <video id="media-view" playsinline preload="metadata"></video>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>
