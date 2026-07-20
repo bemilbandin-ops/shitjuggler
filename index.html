@@ -17,7 +17,7 @@
           <h1>ShitJuggler</h1>
           <p>Live and recorded juggling footage in one browser workspace.</p>
         </div>
-        <span class="scope-label">Build step 1</span>
+        <span class="scope-label">Build step 2</span>
       </header>
 
       <section class="workspace" aria-labelledby="source-heading">
@@ -55,7 +55,36 @@
             <div class="frame-mark" aria-hidden="true"></div>
             <p>Select a camera or video file to begin.</p>
           </div>
+
           <video id="media-view" playsinline preload="metadata"></video>
+
+          <div class="playback-controls" id="playback-controls" hidden>
+            <div class="transport-controls">
+              <button class="control-button primary-control" id="play-pause-button" type="button">
+                Play
+              </button>
+              <button class="control-button" id="restart-button" type="button">
+                Restart
+              </button>
+            </div>
+
+            <div class="timeline-control">
+              <input
+                id="seek-range"
+                type="range"
+                min="0"
+                max="1000"
+                step="1"
+                value="0"
+                aria-label="Seek video"
+              />
+              <p class="time-display" aria-live="off">
+                <span id="current-time">0:00</span>
+                <span aria-hidden="true">/</span>
+                <span id="duration-time">0:00</span>
+              </p>
+            </div>
+          </div>
         </div>
       </section>
     </main>
