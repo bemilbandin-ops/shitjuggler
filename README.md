@@ -2,17 +2,21 @@
 
 Browser-based workspace for live and recorded juggling footage.
 
-## Current scope: build step 1
+## Current scope: build step 2
 
-This first implementation includes only:
+This implementation includes:
 
 - Live camera capture through `getUserMedia`
-- Local video-file upload and playback
+- Local video-file upload
+- Custom play and pause control for uploaded video
+- Restart-from-beginning control
+- Seekable playback timeline with current time and duration
+- Click-on-video play and pause behavior
 - Clean switching between live and uploaded sources
 - Cleanup of camera tracks and temporary object URLs
 - Responsive desktop and mobile layout
 
-Tracking, detection, custom playback controls, and visual effects are intentionally not included yet.
+Detection, tracking, effects, and advanced playback tools such as frame stepping or playback speed are intentionally not included yet.
 
 ## Run locally
 
