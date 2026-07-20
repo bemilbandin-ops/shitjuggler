@@ -5,19 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="A browser-based workspace for detecting, tracking, and independently extending visual effects for juggling footage."
+      content="A browser-based workspace for detecting and tracking juggling props with movement-driven neon trail effects."
     />
-    <title>ShitJuggler — Tracking and Effect Workspace</title>
+    <title>ShitJuggler — Neon Motion Trails</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="motion-trails.css" />
   </head>
   <body>
     <main class="app-shell">
       <header class="app-header">
         <div>
           <h1>ShitJuggler</h1>
-          <p>Local prop tracking with an independent visual-effect runtime.</p>
+          <p>Local prop tracking with responsive neon motion trails.</p>
         </div>
-        <span class="scope-label">Build step 5</span>
+        <span class="scope-label">Build step 6</span>
       </header>
 
       <section class="workspace" aria-labelledby="source-heading">
@@ -160,6 +161,142 @@
             </div>
           </section>
 
+          <section class="panel-section effect-settings" aria-labelledby="effect-heading">
+            <div class="section-heading-row">
+              <div>
+                <p class="section-label">Visual effect</p>
+                <h2 id="effect-heading">Motion trails</h2>
+              </div>
+              <span class="effect-status-badge" id="effect-status-badge">Off</span>
+            </div>
+
+            <p class="section-copy" id="effect-description">
+              Glowing ribbons follow each tracked prop without crossing tracking gaps.
+            </p>
+
+            <label class="select-control" for="effect-select">
+              <span>Effect</span>
+              <select id="effect-select">
+                <option value="">No effect</option>
+              </select>
+            </label>
+
+            <label class="select-control" for="effect-preset">
+              <span>Preset</span>
+              <select id="effect-preset"></select>
+            </label>
+
+            <div class="effect-controls" id="effect-controls">
+              <div class="range-control">
+                <div class="control-label-row">
+                  <label for="effect-trail-length">Trail length</label>
+                  <output data-effect-output="trail-length" for="effect-trail-length">32</output>
+                </div>
+                <input
+                  id="effect-trail-length"
+                  data-effect-control="trail-length"
+                  type="range"
+                  min="4"
+                  max="48"
+                  step="1"
+                  value="32"
+                />
+              </div>
+
+              <div class="range-control">
+                <div class="control-label-row">
+                  <label for="effect-trail-width">Trail width</label>
+                  <output data-effect-output="trail-width" for="effect-trail-width">4px</output>
+                </div>
+                <input
+                  id="effect-trail-width"
+                  data-effect-control="trail-width"
+                  type="range"
+                  min="1"
+                  max="12"
+                  step="0.5"
+                  value="4"
+                />
+              </div>
+
+              <div class="range-control">
+                <div class="control-label-row">
+                  <label for="effect-glow">Glow strength</label>
+                  <output data-effect-output="glow" for="effect-glow">14px</output>
+                </div>
+                <input
+                  id="effect-glow"
+                  data-effect-control="glow"
+                  type="range"
+                  min="0"
+                  max="30"
+                  step="1"
+                  value="14"
+                />
+              </div>
+
+              <div class="range-control">
+                <div class="control-label-row">
+                  <label for="effect-opacity">Opacity</label>
+                  <output data-effect-output="opacity" for="effect-opacity">85%</output>
+                </div>
+                <input
+                  id="effect-opacity"
+                  data-effect-control="opacity"
+                  type="range"
+                  min="0.1"
+                  max="1"
+                  step="0.05"
+                  value="0.85"
+                />
+              </div>
+
+              <div class="range-control">
+                <div class="control-label-row">
+                  <label for="effect-head-size">Head size</label>
+                  <output data-effect-output="head-size" for="effect-head-size">7px</output>
+                </div>
+                <input
+                  id="effect-head-size"
+                  data-effect-control="head-size"
+                  type="range"
+                  min="2"
+                  max="18"
+                  step="1"
+                  value="7"
+                />
+              </div>
+
+              <div class="effect-color-row">
+                <div class="color-control">
+                  <label for="effect-color">Trail color</label>
+                  <div class="color-control-row">
+                    <input id="effect-color" data-effect-control="color" type="color" value="#7c6cff" />
+                  </div>
+                </div>
+
+                <label class="select-control" for="effect-color-mode">
+                  <span>Color response</span>
+                  <select id="effect-color-mode" data-effect-control="color-mode">
+                    <option value="single">Single color</option>
+                    <option value="prop">Different per prop</option>
+                    <option value="speed">Change with speed</option>
+                  </select>
+                </label>
+              </div>
+
+              <label class="check-control effect-toggle">
+                <input data-effect-control="show-head" type="checkbox" checked />
+                <span>Show glowing head</span>
+              </label>
+            </div>
+
+            <div class="detection-status effect-runtime-status" aria-live="polite">
+              <p id="effect-status-title">Effect loading</p>
+              <p id="effect-status-detail">Preparing the motion-trail renderer.</p>
+            </div>
+          </section>
+
           <div class="source-status" aria-live="polite">
             <span class="status-dot" id="status-dot" aria-hidden="true"></span>
             <div>
@@ -224,6 +361,7 @@
     <script src="detection.js" defer></script>
     <script src="tracking.js" defer></script>
     <script src="effects.js" defer></script>
+    <script src="motion-trails.js" defer></script>
     <script src="app.js" defer></script>
     <script src="processing.js" defer></script>
     <script src="media.js" defer></script>
