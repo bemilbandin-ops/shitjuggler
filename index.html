@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="A browser-based workspace for live and recorded juggling footage."
+      content="A browser-based workspace for detecting juggling props in live and recorded footage."
     />
-    <title>ShitJuggler — Video Workspace</title>
+    <title>ShitJuggler — Prop Detection Workspace</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -15,31 +15,150 @@
       <header class="app-header">
         <div>
           <h1>ShitJuggler</h1>
-          <p>Live and recorded juggling footage in one browser workspace.</p>
+          <p>Local, adjustable prop detection for live and recorded juggling footage.</p>
         </div>
-        <span class="scope-label">Build step 2</span>
+        <span class="scope-label">Build step 3</span>
       </header>
 
       <section class="workspace" aria-labelledby="source-heading">
         <aside class="source-panel">
-          <div>
+          <section class="panel-section">
             <p class="section-label">Video source</p>
             <h2 id="source-heading">Choose footage</h2>
             <p class="section-copy">
               Start a live camera feed or load a video file from this device.
             </p>
-          </div>
 
-          <div class="source-actions">
-            <button class="primary-action" id="camera-button" type="button">
-              Use live camera
-            </button>
+            <div class="source-actions">
+              <button class="primary-action" id="camera-button" type="button">
+                Use live camera
+              </button>
 
-            <label class="secondary-action" for="video-upload">
-              Upload a video
+              <label class="secondary-action" for="video-upload">
+                Upload a video
+              </label>
+              <input id="video-upload" type="file" accept="video/*" />
+            </div>
+          </section>
+
+          <section class="panel-section detection-settings" aria-labelledby="detection-heading">
+            <div class="section-heading-row">
+              <div>
+                <p class="section-label">Detection</p>
+                <h2 id="detection-heading">Adjust signals</h2>
+              </div>
+              <span class="count-badge" id="detection-count">0</span>
+            </div>
+
+            <fieldset class="method-fieldset">
+              <legend>Detection methods</legend>
+              <label class="check-control">
+                <input id="method-brightness" type="checkbox" checked />
+                <span>Brightness</span>
+              </label>
+              <label class="check-control">
+                <input id="method-color" type="checkbox" checked />
+                <span>Target color</span>
+              </label>
+              <label class="check-control">
+                <input id="method-background" type="checkbox" />
+                <span>Background difference</span>
+              </label>
+            </fieldset>
+
+            <label class="select-control" for="method-combination">
+              <span>Combine enabled methods</span>
+              <select id="method-combination">
+                <option value="any">Match any enabled method</option>
+                <option value="all">Match all enabled methods</option>
+              </select>
             </label>
-            <input id="video-upload" type="file" accept="video/*" />
-          </div>
+
+            <div class="range-control">
+              <div class="control-label-row">
+                <label for="sensitivity-range">Sensitivity</label>
+                <output id="sensitivity-value" for="sensitivity-range">55</output>
+              </div>
+              <input id="sensitivity-range" type="range" min="0" max="100" step="1" value="55" />
+            </div>
+
+            <div class="range-control">
+              <div class="control-label-row">
+                <label for="brightness-range">Brightness threshold</label>
+                <output id="brightness-value" for="brightness-range">190</output>
+              </div>
+              <input id="brightness-range" type="range" min="0" max="255" step="1" value="190" />
+            </div>
+
+            <div class="color-control">
+              <label for="target-color">Target color</label>
+              <div class="color-control-row">
+                <input id="target-color" type="color" value="#ff3b30" />
+                <button class="small-button" id="sample-color-button" type="button" aria-pressed="false">
+                  Sample from video
+                </button>
+              </div>
+              <p class="control-help" id="sample-help">Select the button, then tap a visible prop.</p>
+            </div>
+
+            <div class="range-control">
+              <div class="control-label-row">
+                <label for="color-tolerance-range">Color tolerance</label>
+                <output id="color-tolerance-value" for="color-tolerance-range">50</output>
+              </div>
+              <input id="color-tolerance-range" type="range" min="0" max="255" step="1" value="50" />
+            </div>
+
+            <div class="range-control">
+              <div class="control-label-row">
+                <label for="background-strength-range">Background-removal strength</label>
+                <output id="background-strength-value" for="background-strength-range">55</output>
+              </div>
+              <input id="background-strength-range" type="range" min="0" max="100" step="1" value="55" />
+            </div>
+
+            <div class="button-pair">
+              <button class="small-button" id="capture-background-button" type="button">
+                Capture background
+              </button>
+              <button class="small-button" id="reset-background-button" type="button" disabled>
+                Reset background
+              </button>
+            </div>
+
+            <div class="range-control">
+              <div class="control-label-row">
+                <label for="min-region-range">Minimum region size</label>
+                <output id="min-region-value" for="min-region-range">0.03%</output>
+              </div>
+              <input
+                id="min-region-range"
+                type="range"
+                min="0.01"
+                max="5"
+                step="0.01"
+                value="0.03"
+              />
+            </div>
+
+            <div class="range-control">
+              <div class="control-label-row">
+                <label for="max-region-range">Maximum region size</label>
+                <output id="max-region-value" for="max-region-range">20%</output>
+              </div>
+              <input id="max-region-range" type="range" min="1" max="100" step="1" value="20" />
+            </div>
+
+            <label class="check-control debug-toggle">
+              <input id="show-mask" type="checkbox" />
+              <span>Show detection mask</span>
+            </label>
+
+            <div class="detection-status" aria-live="polite">
+              <p id="detection-status-title">Detection idle</p>
+              <p id="detection-status-detail">Choose a source to analyze frames.</p>
+            </div>
+          </section>
 
           <div class="source-status" aria-live="polite">
             <span class="status-dot" id="status-dot" aria-hidden="true"></span>
@@ -51,12 +170,20 @@
         </aside>
 
         <div class="video-stage" id="video-stage">
-          <div class="empty-state" id="empty-state">
-            <div class="frame-mark" aria-hidden="true"></div>
-            <p>Select a camera or video file to begin.</p>
-          </div>
+          <div class="video-surface" id="video-surface">
+            <div class="empty-state" id="empty-state">
+              <div class="frame-mark" aria-hidden="true"></div>
+              <p>Select a camera or video file to begin.</p>
+            </div>
 
-          <video id="media-view" playsinline preload="metadata"></video>
+            <video id="media-view" playsinline preload="metadata"></video>
+            <canvas id="detection-overlay" aria-hidden="true"></canvas>
+
+            <div class="stage-status" aria-live="polite">
+              <span id="stage-detection-count">0 detections</span>
+              <span id="stage-processing-status">Idle</span>
+            </div>
+          </div>
 
           <div class="playback-controls" id="playback-controls" hidden>
             <div class="transport-controls">
@@ -89,6 +216,10 @@
       </section>
     </main>
 
+    <script src="detection.js" defer></script>
     <script src="app.js" defer></script>
+    <script src="processing.js" defer></script>
+    <script src="media.js" defer></script>
+    <script src="events.js" defer></script>
   </body>
 </html>

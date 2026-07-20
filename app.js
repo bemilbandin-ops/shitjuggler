@@ -1,7 +1,11 @@
+
 const cameraButton = document.querySelector("#camera-button");
 const uploadInput = document.querySelector("#video-upload");
 const mediaView = document.querySelector("#media-view");
+const videoSurface = document.querySelector("#video-surface");
 const emptyState = document.querySelector("#empty-state");
+const detectionOverlay = document.querySelector("#detection-overlay");
+const overlayContext = detectionOverlay.getContext("2d");
 const statusDot = document.querySelector("#status-dot");
 const statusTitle = document.querySelector("#status-title");
 const statusDetail = document.querySelector("#status-detail");
@@ -11,13 +15,53 @@ const restartButton = document.querySelector("#restart-button");
 const seekRange = document.querySelector("#seek-range");
 const currentTimeLabel = document.querySelector("#current-time");
 const durationTimeLabel = document.querySelector("#duration-time");
+const detectionCount = document.querySelector("#detection-count");
+const stageDetectionCount = document.querySelector("#stage-detection-count");
+const stageProcessingStatus = document.querySelector("#stage-processing-status");
+const detectionStatusTitle = document.querySelector("#detection-status-title");
+const detectionStatusDetail = document.querySelector("#detection-status-detail");
+const brightnessMethod = document.querySelector("#method-brightness");
+const colorMethod = document.querySelector("#method-color");
+const backgroundMethod = document.querySelector("#method-background");
+const methodCombination = document.querySelector("#method-combination");
+const sensitivityRange = document.querySelector("#sensitivity-range");
+const sensitivityValue = document.querySelector("#sensitivity-value");
+const brightnessRange = document.querySelector("#brightness-range");
+const brightnessValue = document.querySelector("#brightness-value");
+const targetColor = document.querySelector("#target-color");
+const sampleColorButton = document.querySelector("#sample-color-button");
+const sampleHelp = document.querySelector("#sample-help");
+const colorToleranceRange = document.querySelector("#color-tolerance-range");
+const colorToleranceValue = document.querySelector("#color-tolerance-value");
+const backgroundStrengthRange = document.querySelector("#background-strength-range");
+const backgroundStrengthValue = document.querySelector("#background-strength-value");
+const captureBackgroundButton = document.querySelector("#capture-background-button");
+const resetBackgroundButton = document.querySelector("#reset-background-button");
+const minRegionRange = document.querySelector("#min-region-range");
+const minRegionValue = document.querySelector("#min-region-value");
+const maxRegionRange = document.querySelector("#max-region-range");
+const maxRegionValue = document.querySelector("#max-region-value");
+const showMask = document.querySelector("#show-mask");
 
 const SEEK_MAX = 1000;
+const detector = new PropDetector({ maxProcessingWidth: 480 });
 
 const mediaState = {
   stream: null,
   objectUrl: null,
   source: "none",
+};
+
+const detectionState = {
+  frameCallbackId: null,
+  animationFrameId: null,
+  singleFrameRequestId: null,
+  singleFrameRequestType: null,
+  loopGeneration: 0,
+  processing: false,
+  samplingColor: false,
+  lastResult: null,
+  detections: [],
 };
 
 function updateStatus(type, title, detail) {
@@ -35,9 +79,16 @@ function updateStatus(type, title, detail) {
   statusDetail.textContent = detail;
 }
 
+function updateDetectionStatus(title, detail, stageText = title) {
+  detectionStatusTitle.textContent = title;
+  detectionStatusDetail.textContent = detail;
+  stageProcessingStatus.textContent = stageText;
+}
+
 function showMedia() {
   emptyState.classList.add("is-hidden");
   mediaView.classList.add("is-visible");
+  resizeOverlayCanvas();
 }
 
 function formatTime(seconds) {
@@ -122,6 +173,8 @@ function releaseUploadedVideo() {
 }
 
 function resetVideoElement() {
+  stopDetectionLoop();
+  cancelSingleDetectionFrame();
   mediaView.pause();
   mediaView.removeAttribute("src");
   mediaView.srcObject = null;
@@ -130,6 +183,7 @@ function resetVideoElement() {
   mediaState.source = "none";
   hidePlaybackControls();
   resetPlaybackControls();
+  resetDetectionForSourceChange();
 }
 
 function describeCameraError(error) {
@@ -147,170 +201,104 @@ function describeCameraError(error) {
   }
 }
 
-async function startCamera() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    updateStatus(
-      "error",
-      "Camera unavailable",
-      "This browser does not support camera capture, or the page is not in a secure context.",
-    );
-    return;
-  }
-
-  cameraButton.disabled = true;
-  cameraButton.textContent = "Starting camera…";
-  updateStatus("idle", "Requesting camera", "Waiting for browser permission.");
-
-  stopCameraStream();
-  releaseUploadedVideo();
-  resetVideoElement();
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: "user",
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-      },
-    });
-
-    mediaState.stream = stream;
-    mediaState.source = "camera";
-    mediaView.srcObject = stream;
-    mediaView.muted = true;
-    await mediaView.play();
-
-    showMedia();
-    hidePlaybackControls();
-    updateStatus("active", "Live camera active", "The camera feed is ready for future tracking work.");
-  } catch (error) {
-    resetVideoElement();
-    updateStatus("error", "Camera could not start", describeCameraError(error));
-  } finally {
-    cameraButton.disabled = false;
-    cameraButton.textContent = "Use live camera";
-  }
+function readDetectionSettings() {
+  return {
+    brightnessEnabled: brightnessMethod.checked,
+    colorEnabled: colorMethod.checked,
+    backgroundEnabled: backgroundMethod.checked,
+    combination: methodCombination.value,
+    sensitivity: Number(sensitivityRange.value),
+    brightnessThreshold: Number(brightnessRange.value),
+    targetColor: targetColor.value,
+    colorTolerance: Number(colorToleranceRange.value),
+    backgroundStrength: Number(backgroundStrengthRange.value),
+    minRegionPercent: Number(minRegionRange.value),
+    maxRegionPercent: Number(maxRegionRange.value),
+    showMask: showMask.checked,
+  };
 }
 
-function loadUploadedVideo(file) {
-  if (!file) {
-    return;
+function updateControlOutputs() {
+  sensitivityValue.value = sensitivityRange.value;
+  brightnessValue.value = brightnessRange.value;
+  colorToleranceValue.value = colorToleranceRange.value;
+  backgroundStrengthValue.value = backgroundStrengthRange.value;
+  minRegionValue.value = `${Number(minRegionRange.value).toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}%`;
+  maxRegionValue.value = `${maxRegionRange.value}%`;
+}
+
+function updateDetectionCount(count) {
+  detectionCount.textContent = String(count);
+  stageDetectionCount.textContent = `${count} detection${count === 1 ? "" : "s"}`;
+}
+
+function clearOverlay() {
+  const bounds = videoSurface.getBoundingClientRect();
+  overlayContext.clearRect(0, 0, bounds.width, bounds.height);
+}
+
+function clearCurrentDetections({ status = null } = {}) {
+  detectionState.lastResult = null;
+  detectionState.detections = [];
+  updateDetectionCount(0);
+  clearOverlay();
+
+  if (status) {
+    updateDetectionStatus(status.title, status.detail, status.stageText);
   }
 
-  if (!file.type.startsWith("video/")) {
-    updateStatus("error", "Unsupported file", "Choose a file recognized by the browser as video.");
-    return;
-  }
+  publishDetections(null);
+}
 
-  stopCameraStream();
-  releaseUploadedVideo();
-  resetVideoElement();
-
-  mediaState.source = "upload";
-  mediaState.objectUrl = URL.createObjectURL(file);
-  mediaView.src = mediaState.objectUrl;
-  mediaView.muted = false;
-
-  mediaView.addEventListener(
-    "loadedmetadata",
-    () => {
-      showMedia();
-      showPlaybackControls();
-      updateStatus(
-        "active",
-        "Uploaded video ready",
-        `${file.name} is loaded. Use the playback controls below the video.`,
-      );
+function resetDetectionForSourceChange() {
+  detector.reset();
+  resetBackgroundButton.disabled = true;
+  setSamplingMode(false);
+  clearCurrentDetections({
+    status: {
+      title: "Detection idle",
+      detail: "Choose a source to analyze frames.",
+      stageText: "Idle",
     },
-    { once: true },
-  );
-
-  mediaView.addEventListener(
-    "error",
-    () => {
-      hidePlaybackControls();
-      updateStatus(
-        "error",
-        "Video could not load",
-        "The file format or codec may not be supported by this browser.",
-      );
-    },
-    { once: true },
-  );
-
-  mediaView.load();
+  });
 }
 
-async function togglePlayback() {
-  if (mediaState.source !== "upload") {
-    return;
+function resizeOverlayCanvas() {
+  const bounds = videoSurface.getBoundingClientRect();
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.round(bounds.width * pixelRatio));
+  const height = Math.max(1, Math.round(bounds.height * pixelRatio));
+
+  if (detectionOverlay.width !== width || detectionOverlay.height !== height) {
+    detectionOverlay.width = width;
+    detectionOverlay.height = height;
+    detectionOverlay.style.width = `${bounds.width}px`;
+    detectionOverlay.style.height = `${bounds.height}px`;
   }
 
-  if (mediaView.ended) {
-    mediaView.currentTime = 0;
-  }
-
-  if (mediaView.paused) {
-    try {
-      await mediaView.play();
-    } catch {
-      updateStatus("error", "Playback could not start", "The browser blocked or could not start this video.");
-    }
-    return;
-  }
-
-  mediaView.pause();
+  overlayContext.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  renderDetectionOverlay();
 }
 
-async function restartPlayback() {
-  if (mediaState.source !== "upload") {
-    return;
+function getVideoContentRect() {
+  const bounds = videoSurface.getBoundingClientRect();
+  const sourceWidth = mediaView.videoWidth;
+  const sourceHeight = mediaView.videoHeight;
+
+  if (!sourceWidth || !sourceHeight || !bounds.width || !bounds.height) {
+    return null;
   }
 
-  mediaView.currentTime = 0;
+  const scale = Math.min(bounds.width / sourceWidth, bounds.height / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
 
-  try {
-    await mediaView.play();
-  } catch {
-    updateTimeline();
-    updatePlayPauseButton();
-  }
+  return {
+    left: (bounds.width - width) / 2,
+    top: (bounds.height - height) / 2,
+    width,
+    height,
+    sourceWidth,
+    sourceHeight,
+  };
 }
-
-function seekPlayback() {
-  if (mediaState.source !== "upload" || !Number.isFinite(mediaView.duration)) {
-    return;
-  }
-
-  mediaView.currentTime = (Number(seekRange.value) / SEEK_MAX) * mediaView.duration;
-  updateTimeline();
-}
-
-cameraButton.addEventListener("click", startCamera);
-playPauseButton.addEventListener("click", togglePlayback);
-restartButton.addEventListener("click", restartPlayback);
-seekRange.addEventListener("input", seekPlayback);
-
-mediaView.addEventListener("play", updatePlayPauseButton);
-mediaView.addEventListener("pause", updatePlayPauseButton);
-mediaView.addEventListener("ended", updatePlayPauseButton);
-mediaView.addEventListener("timeupdate", updateTimeline);
-mediaView.addEventListener("durationchange", updateTimeline);
-
-mediaView.addEventListener("click", () => {
-  if (mediaState.source === "upload") {
-    togglePlayback();
-  }
-});
-
-uploadInput.addEventListener("change", (event) => {
-  const [file] = event.target.files;
-  loadUploadedVideo(file);
-  event.target.value = "";
-});
-
-window.addEventListener("pagehide", () => {
-  stopCameraStream();
-  releaseUploadedVideo();
-});
