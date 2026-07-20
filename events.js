@@ -115,6 +115,19 @@ window.shitJuggler = Object.freeze({
   },
 });
 
+function loadPresetFeature() {
+  if (document.querySelector('script[data-shitjuggler-presets]')) return;
+
+  const script = document.createElement("script");
+  script.src = "presets.js";
+  script.async = false;
+  script.dataset.shitjugglerPresets = "";
+  script.addEventListener("error", () => {
+    console.error("ShitJuggler preset module could not be loaded.");
+  });
+  document.body.append(script);
+}
+
 function loadRecordingFeature() {
   if (document.querySelector('script[data-shitjuggler-recording]')) return;
 
@@ -137,4 +150,5 @@ function loadRecordingFeature() {
 updateControlOutputs();
 updateDetectionCount(0);
 stageDetectionCount.textContent = "0 tracked · 0 detected";
+loadPresetFeature();
 loadRecordingFeature();
