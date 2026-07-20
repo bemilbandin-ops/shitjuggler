@@ -2,7 +2,7 @@
 
 Browser-based workspace for live and recorded juggling footage.
 
-## Current scope: build step 3
+## Current scope: build step 4
 
 This implementation includes:
 
@@ -15,14 +15,21 @@ This implementation includes:
 - User-assisted target-color sampling by clicking or tapping the visible video
 - Lower-resolution offscreen frame processing while the displayed video remains sharp
 - Connected-region filtering by minimum/maximum size, fill, and aspect ratio
-- A canvas overlay with current bounding boxes, center markers, confidence, and contributing methods
-- Optional detection-mask overlay and basic processing status
-- Cleanup of detections, masks, background references, camera tracks, and temporary object URLs when sources change
+- Stable multi-frame prop IDs with motion-aware detection association
+- Smoothed position, size, velocity, speed, direction, angle, length, and tracking confidence
+- Bounded recent movement history for every tracked prop
+- Short prediction and confidence fading when a prop is temporarily lost
+- Explicit history breaks after loss, seeking, restart, source changes, or timeline jumps so unrelated positions are never joined
+- A canvas overlay with tracked boxes, IDs, confidence, speed, movement vectors, and recent paths
+- Optional detection-mask overlay and processing status
+- Cleanup of detections, tracks, histories, masks, background references, camera tracks, and temporary object URLs when sources change
 - Responsive desktop and mobile controls
 
-Each current-frame detection is exposed through `window.shitJuggler.getCurrentDetections()` and the `shitjuggler:detections` window event. Detection objects include center `x`/`y`, bounding `width`/`height`, `area`, `score`/`confidence`, and contributing `method`/`methods`.
+Raw current-frame detections remain available through `window.shitJuggler.getCurrentDetections()` and the `shitjuggler:detections` event. The same event now also includes a `tracks` array.
 
-Stable multi-frame tracking, movement history, visual effects, presets, and interface refinement are intentionally not implemented yet. Build step 4 will consume the current-frame detections and add tracking separately.
+Stable tracked props are available through `window.shitJuggler.getCurrentTracks()`, `window.shitJuggler.getTrackingSnapshot()`, and the `shitjuggler:tracks` event. Each track includes a stable `id`, current position, normalized position, approximate size and length, velocity, speed, movement direction and angle, confidence, status, missed-frame count, contributing detection methods, and bounded recent `history`. History points may include `breakBefore: true` to prevent effects from drawing across a tracking gap.
+
+Visual effects, effect-specific controls, presets, performance adaptation, and interface refinement are intentionally not implemented yet. Build step 5 can consume the tracked-prop API without rebuilding detection or tracking.
 
 ## Run locally
 
@@ -34,10 +41,19 @@ python3 -m http.server 8080
 
 Then open `http://localhost:8080`.
 
+## Validate tracking logic
+
+The tracker has a dependency-free Node smoke test:
+
+```bash
+node tracking.test.js
+```
+
 ## Browser notes
 
 - Camera permission must be granted when prompted.
 - Uploaded video support depends on the browser's available codecs.
 - Background-difference detection works best when the camera is fixed and the reference frame contains no moving props.
-- Detection processing uses only the current frame plus one optional captured background frame; it does not retain unlimited footage.
+- Detection processing uses only the current frame plus one optional captured background frame.
+- Tracking retains only a short, bounded movement history for each active prop.
 - No uploaded file or captured frame leaves the browser.
