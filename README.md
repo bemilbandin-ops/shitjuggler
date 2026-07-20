@@ -2,7 +2,7 @@
 
 Browser-based workspace for live and recorded juggling footage.
 
-## Current scope: build step 9
+## Current scope: build step 10
 
 This implementation includes:
 
@@ -21,6 +21,7 @@ This implementation includes:
 - Short prediction and confidence fading when a prop is temporarily lost
 - Explicit history breaks after loss, seeking, restart, source changes, or timeline jumps so unrelated positions are never joined
 - A canvas overlay with tracked boxes, IDs, confidence, speed, movement vectors, and recent paths
+- A **Show tracking diagnostics** toggle that hides the boxes, labels, vectors, and diagnostic paths without disabling tracking or the selected effect
 - An independent visual-effect registry and runtime on a dedicated canvas
 - Effect-definition validation for unique IDs, effect briefs, movement inputs, controls, presets, and lifecycle hooks
 - Source-to-display coordinate mapping for current tracks and bounded movement history
@@ -36,6 +37,10 @@ This implementation includes:
 - Optional inclusion of the tracking diagnostics overlay in exported recordings
 - Safe recording shutdown on source changes, seeking, playback completion, and page exit
 - Optional detection-mask overlay and processing status
+- Adaptive detection quality that reacts to sustained frame-rate or processing pressure
+- Three bounded processing tiers that lower detection resolution and analysis cadence while leaving the displayed video sharp
+- Hysteresis-based recovery that restores quality only after sustained healthy performance
+- Performance telemetry covering measured callback FPS, processing time, skipped analysis frames, quality tier, and maximum simultaneous prop count
 - Responsive desktop and mobile controls
 
 Raw current-frame detections remain available through `window.shitJuggler.getCurrentDetections()` and the `shitjuggler:detections` event. The same event also includes a `tracks` array.
@@ -95,6 +100,18 @@ Every preset declares a value for every control belonging to its effect. The int
 
 The preset feature is loaded as an independent browser module. It rebuilds the four existing effect definitions with preset metadata while preserving their IDs, renderers, state ownership, and cleanup behavior.
 
+## Performance adaptation
+
+Build step 10 adds a bounded adaptive-performance controller around the existing detection loop.
+
+The controller observes browser video-frame callback cadence and detector processing time. Sustained overload lowers the internal processing width from 480 to 400 and then 320 pixels, and the lower tiers also reduce how often frames are analyzed. The visible video element is never downscaled by this system. Sustained healthy measurements restore the higher tiers gradually so quality does not oscillate after isolated slow frames.
+
+Changing the internal processing size invalidates a captured background reference because that reference belongs to the old working resolution. The interface reports that a new background frame is required instead of comparing incompatible pixel buffers.
+
+Performance state is available through `window.shitJuggler.getPerformanceState()`. It reports the active tier, internal width, measured callback FPS, average detector time, load ratio, processed and skipped frame counts, and the maximum simultaneous prop count seen for the current source.
+
+Tracking diagnostics can be controlled through the interface or with `window.shitJuggler.setTrackingDiagnosticsVisible(boolean)`. Hiding diagnostics clears the boxes, labels, vectors, and diagnostic paths while tracking data and visual effects continue to run.
+
 ## Rendered recording and export
 
 Build step 7 adds local recording after detection, tracking, and effects have been composed. The recorder draws the original media frame into a dedicated export canvas, crops the display overlays to the actual contained video rectangle, scales them to the selected output dimensions, and records that canvas with `MediaRecorder`.
@@ -143,7 +160,7 @@ Then open `http://localhost:8080`.
 
 ## Validate core logic
 
-The tracker, effect runtime, effect renderers, preset definitions, and recording geometry/format selection have dependency-free Node smoke tests:
+The tracker, effect runtime, effect renderers, preset definitions, recording geometry/format selection, and adaptive performance logic have dependency-free Node smoke tests:
 
 ```bash
 node tracking.test.js
@@ -152,7 +169,10 @@ node motion-trails.test.js
 node additional-effects.test.js
 node presets.test.js
 node recording.test.js
+node performance.test.js
 ```
+
+The performance test exercises sustained overload and recovery with six simultaneous props, confirms quality-tier changes and frame skipping, and verifies that a new media source resets the controller cleanly.
 
 ## Browser notes
 
@@ -165,6 +185,9 @@ node recording.test.js
 - Trail and symbol renderers respect `breakBefore` history markers and never join separated track segments.
 - Spark particles are capped and expired particles are removed every frame.
 - Presets remain settings bundles under their existing effect and never register as separate effect IDs.
+- Adaptive quality changes only the detector's working image and analysis cadence; the displayed source video remains sharp.
+- Captured background references must be recaptured after an adaptive processing-size change.
+- Tracking diagnostics can be hidden independently of the detection mask and visual-effect canvas.
 - Recording requires both `HTMLCanvasElement.captureStream()` and `MediaRecorder`.
 - The downloaded container and codec depend on browser support; WebM is expected in most Chromium and Firefox configurations, while MP4 may be selected where supported.
 - Uploaded-video audio export depends on the browser exposing audio through `HTMLMediaElement.captureStream()`.
