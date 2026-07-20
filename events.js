@@ -115,6 +115,26 @@ window.shitJuggler = Object.freeze({
   },
 });
 
+function loadRecordingFeature() {
+  if (document.querySelector('script[data-shitjuggler-recording]')) return;
+
+  const stylesheet = document.createElement("link");
+  stylesheet.rel = "stylesheet";
+  stylesheet.href = "recording.css";
+  stylesheet.dataset.shitjugglerRecording = "";
+  document.head.append(stylesheet);
+
+  const script = document.createElement("script");
+  script.src = "recording.js";
+  script.async = false;
+  script.dataset.shitjugglerRecording = "";
+  script.addEventListener("error", () => {
+    console.error("ShitJuggler recording module could not be loaded.");
+  });
+  document.body.append(script);
+}
+
 updateControlOutputs();
 updateDetectionCount(0);
 stageDetectionCount.textContent = "0 tracked · 0 detected";
+loadRecordingFeature();
