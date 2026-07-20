@@ -2,7 +2,7 @@
 
 Browser-based workspace for live and recorded juggling footage.
 
-## Current scope: build step 6
+## Current scope: build step 7
 
 This implementation includes:
 
@@ -25,9 +25,14 @@ This implementation includes:
 - Effect-definition validation for unique IDs, effect briefs, movement inputs, controls, presets, and lifecycle hooks
 - Source-to-display coordinate mapping for current tracks and bounded movement history
 - Effect cleanup on switching, unregistering, source changes, seeking, runtime reset, draw failure, and page exit
-- The first complete effect: confidence-aware neon motion trails driven by prop history, speed, size, and position
+- Confidence-aware neon motion trails driven by prop history, speed, size, and position
 - Effect-specific controls for trail length, width, glow, opacity, head size, color response, and visibility
 - Balanced, Comet, and Clean lines presets
+- Local recording of the source video composited with the active effect
+- Source, 1080p, 720p, and 480p export sizing without upscaling smaller footage
+- 30 fps and 60 fps recording choices with browser-selected WebM or MP4 encoding
+- Optional inclusion of the tracking diagnostics overlay in exported recordings
+- Safe recording shutdown on source changes, seeking, playback completion, and page exit
 - Optional detection-mask overlay and processing status
 - Responsive desktop and mobile controls
 
@@ -49,6 +54,25 @@ Approved effect brief:
 
 The interface exposes the effect selector, three presets, and effect-specific controls. Color can remain fixed, vary per tracked prop, or respond to speed. Selecting **No effect** clears the effect canvas without disabling tracking or detection.
 
+## Rendered recording and export
+
+Build step 7 adds local recording after detection, tracking, and effects have been composed. The recorder draws the original media frame into a dedicated export canvas, crops the display overlays to the actual contained video rectangle, scales them to the selected output dimensions, and records that canvas with `MediaRecorder`.
+
+The active visual effect is always included. Tracking boxes, IDs, vectors, and diagnostic paths remain excluded unless **Include tracking diagnostics** is enabled. Letterbox regions are not exported.
+
+The recorder:
+
+- preserves the source aspect ratio
+- never upscales footage smaller than the selected output size
+- selects the first encoding supported by the browser from VP9 WebM, VP8 WebM, generic WebM, H.264/AAC MP4, and generic MP4
+- includes uploaded-video audio when the browser exposes an audio track through media capture
+- stops and finalizes when uploaded playback ends
+- stops before a seek to avoid exporting unrelated timeline sections as one continuous movement
+- discards an incomplete recording when the media source changes or the page exits
+- retains the last completed recording as a local download until a new recording starts or the page closes
+
+Recording state is available through `window.shitJugglerRecorder.getState()`. The same API exposes `start()`, `stop(options)`, and `download()` for browser-side integrations. Recording lifecycle events are emitted as `shitjuggler:recordingstart` and `shitjuggler:recordingstop`.
+
 ## Effect extension API
 
 Effects can be added independently through `window.shitJugglerEffects`:
@@ -64,7 +88,7 @@ Effects can be added independently through `window.shitJugglerEffects`:
 
 Every registered effect must provide a unique ID and name, visual description, movement inputs, the required effect brief, effect-specific controls, optional presets, and a `create()` factory. The factory returns an isolated instance with `draw()` and optional `activate()`, `controlsChanged()`, and `cleanup()` lifecycle methods. The runtime maps source coordinates into the contained video rectangle before calling `draw()`.
 
-The runtime listens to `shitjuggler:tracks`, so new effects consume tracking output without modifying detection, tracking, media, or playback code. A failing effect is cleaned up and deselected instead of breaking the frame-processing loop.
+The runtime listens to `shitjuggler:tracks`, so new effects consume tracking output without modifying detection, tracking, media, playback, or recording code. A failing effect is cleaned up and deselected instead of breaking the frame-processing loop.
 
 ## Run locally
 
@@ -78,12 +102,13 @@ Then open `http://localhost:8080`.
 
 ## Validate core logic
 
-The tracker, effect runtime, and motion-trail effect have dependency-free Node smoke tests:
+The tracker, effect runtime, motion-trail effect, and recording geometry/format selection have dependency-free Node smoke tests:
 
 ```bash
 node tracking.test.js
 node effects.test.js
 node motion-trails.test.js
+node recording.test.js
 ```
 
 ## Browser notes
@@ -95,4 +120,7 @@ node motion-trails.test.js
 - Tracking retains only a short, bounded movement history for each active prop.
 - Effect instances own their temporary state and must release it in `cleanup()`.
 - The neon trail renderer respects `breakBefore` history markers and never joins separated track segments.
-- No uploaded file or captured frame leaves the browser.
+- Recording requires both `HTMLCanvasElement.captureStream()` and `MediaRecorder`.
+- The downloaded container and codec depend on browser support; WebM is expected in most Chromium and Firefox configurations, while MP4 may be selected where supported.
+- Uploaded-video audio export depends on the browser exposing audio through `HTMLMediaElement.captureStream()`.
+- No uploaded file, captured frame, effect frame, or completed recording leaves the browser.
