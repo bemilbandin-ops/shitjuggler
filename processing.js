@@ -1,3 +1,201 @@
+const PERFORMANCE_QUALITY_LEVELS = Object.freeze([
+  Object.freeze({
+    id: "high",
+    label: "High quality",
+    maxProcessingWidth: 480,
+    minimumFrameIntervalMs: 0,
+  }),
+  Object.freeze({
+    id: "balanced",
+    label: "Balanced quality",
+    maxProcessingWidth: 400,
+    minimumFrameIntervalMs: 30,
+  }),
+  Object.freeze({
+    id: "reduced",
+    label: "Reduced quality",
+    maxProcessingWidth: 320,
+    minimumFrameIntervalMs: 45,
+  }),
+]);
+
+function performanceClamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+class AdaptivePerformanceController {
+  constructor({
+    qualityLevels = PERFORMANCE_QUALITY_LEVELS,
+    downgradeSampleCount = 10,
+    upgradeSampleCount = 90,
+    overloadedProcessingTimeMs = 26,
+    overloadedFrameRate = 20,
+    healthyProcessingTimeMs = 12,
+    healthyFrameRate = 28,
+  } = {}) {
+    this.qualityLevels = qualityLevels.map((quality) => ({ ...quality }));
+    this.downgradeSampleCount = downgradeSampleCount;
+    this.upgradeSampleCount = upgradeSampleCount;
+    this.overloadedProcessingTimeMs = overloadedProcessingTimeMs;
+    this.overloadedFrameRate = overloadedFrameRate;
+    this.healthyProcessingTimeMs = healthyProcessingTimeMs;
+    this.healthyFrameRate = healthyFrameRate;
+    this.reset();
+  }
+
+  reset(source = "none") {
+    this.source = source;
+    this.qualityIndex = 0;
+    this.lastCallbackAtMs = null;
+    this.lastProcessedAtMs = null;
+    this.averageCallbackIntervalMs = null;
+    this.averageProcessingTimeMs = null;
+    this.overloadedSamples = 0;
+    this.healthySamples = 0;
+    this.processedFrames = 0;
+    this.skippedFrames = 0;
+    this.maximumPropCount = 0;
+  }
+
+  setSource(source = "none") {
+    if (source !== this.source) {
+      this.reset(source);
+    }
+  }
+
+  get quality() {
+    return this.qualityLevels[this.qualityIndex];
+  }
+
+  shouldProcessFrame(timestampMs, source = this.source) {
+    this.setSource(source);
+    const now = Number.isFinite(timestampMs) ? timestampMs : performance.now();
+
+    if (this.lastCallbackAtMs !== null) {
+      const callbackInterval = performanceClamp(now - this.lastCallbackAtMs, 1, 250);
+      this.averageCallbackIntervalMs = this.averageCallbackIntervalMs === null
+        ? callbackInterval
+        : this.averageCallbackIntervalMs * 0.86 + callbackInterval * 0.14;
+    }
+    this.lastCallbackAtMs = now;
+
+    const minimumInterval = this.quality.minimumFrameIntervalMs;
+    const elapsedSinceProcessing = this.lastProcessedAtMs === null
+      ? Number.POSITIVE_INFINITY
+      : now - this.lastProcessedAtMs;
+
+    if (minimumInterval > 0 && elapsedSinceProcessing < minimumInterval) {
+      this.skippedFrames += 1;
+      return false;
+    }
+
+    this.lastProcessedAtMs = now;
+    return true;
+  }
+
+  recordFrame({
+    processingTimeMs,
+    propCount = 0,
+    source = this.source,
+    continuous = true,
+  } = {}) {
+    this.setSource(source);
+
+    if (!continuous || !Number.isFinite(processingTimeMs)) {
+      return this.createUpdate(false, null);
+    }
+
+    this.processedFrames += 1;
+    this.maximumPropCount = Math.max(this.maximumPropCount, Math.max(0, propCount));
+    this.averageProcessingTimeMs = this.averageProcessingTimeMs === null
+      ? processingTimeMs
+      : this.averageProcessingTimeMs * 0.82 + processingTimeMs * 0.18;
+
+    const frameRate = this.averageCallbackIntervalMs
+      ? 1000 / this.averageCallbackIntervalMs
+      : null;
+    const frameBudgetMs = this.averageCallbackIntervalMs || 1000 / 30;
+    const loadRatio = this.averageProcessingTimeMs / Math.max(1, frameBudgetMs);
+    const overloaded =
+      this.processedFrames >= 3 &&
+      (this.averageProcessingTimeMs >= this.overloadedProcessingTimeMs ||
+        (frameRate !== null && frameRate < this.overloadedFrameRate) ||
+        loadRatio >= 0.72);
+    const healthy =
+      this.processedFrames >= 12 &&
+      this.averageProcessingTimeMs <= this.healthyProcessingTimeMs &&
+      (frameRate === null || frameRate >= this.healthyFrameRate) &&
+      loadRatio <= 0.45;
+
+    if (overloaded) {
+      this.overloadedSamples += 1;
+      this.healthySamples = 0;
+    } else if (healthy) {
+      this.healthySamples += 1;
+      this.overloadedSamples = 0;
+    } else {
+      this.overloadedSamples = Math.max(0, this.overloadedSamples - 1);
+      this.healthySamples = Math.max(0, this.healthySamples - 1);
+    }
+
+    let changed = false;
+    let reason = null;
+
+    if (
+      this.overloadedSamples >= this.downgradeSampleCount &&
+      this.qualityIndex < this.qualityLevels.length - 1
+    ) {
+      this.qualityIndex += 1;
+      this.overloadedSamples = 0;
+      this.healthySamples = 0;
+      changed = true;
+      reason = "load-high";
+    } else if (this.healthySamples >= this.upgradeSampleCount && this.qualityIndex > 0) {
+      this.qualityIndex -= 1;
+      this.overloadedSamples = 0;
+      this.healthySamples = 0;
+      changed = true;
+      reason = "load-recovered";
+    }
+
+    return this.createUpdate(changed, reason);
+  }
+
+  createUpdate(changed, reason) {
+    return {
+      changed,
+      reason,
+      state: this.getState(),
+    };
+  }
+
+  getState() {
+    const quality = this.quality;
+    const averageFrameRate = this.averageCallbackIntervalMs
+      ? 1000 / this.averageCallbackIntervalMs
+      : null;
+    const frameBudgetMs = this.averageCallbackIntervalMs || 1000 / 30;
+
+    return {
+      source: this.source,
+      qualityId: quality.id,
+      qualityLabel: quality.label,
+      maxProcessingWidth: quality.maxProcessingWidth,
+      minimumFrameIntervalMs: quality.minimumFrameIntervalMs,
+      averageFrameRate,
+      averageProcessingTimeMs: this.averageProcessingTimeMs,
+      loadRatio: this.averageProcessingTimeMs === null
+        ? null
+        : this.averageProcessingTimeMs / Math.max(1, frameBudgetMs),
+      processedFrames: this.processedFrames,
+      skippedFrames: this.skippedFrames,
+      maximumPropCount: this.maximumPropCount,
+    };
+  }
+}
+
+const adaptivePerformance = new AdaptivePerformanceController();
+
 function mapSourcePointToOverlay(x, y, result, contentRect) {
   return {
     x: contentRect.left + (x / result.sourceWidth) * contentRect.width,
@@ -69,6 +267,11 @@ function renderDetectionOverlay() {
       contentRect.height,
     );
     overlayContext.restore();
+  }
+
+  const trackingDiagnosticsToggle = document.querySelector("#show-tracking-diagnostics");
+  if (trackingDiagnosticsToggle && !trackingDiagnosticsToggle.checked) {
+    return;
   }
 
   trackingState.tracks.forEach((track) => renderTrackHistory(track, result, contentRect));
@@ -177,6 +380,8 @@ async function processDetectionFrame({ pausedFrame = false } = {}) {
     return;
   }
 
+  adaptivePerformance.setSource(mediaState.source);
+  detector.maxProcessingWidth = adaptivePerformance.getState().maxProcessingWidth;
   detectionState.processing = true;
 
   try {
@@ -195,6 +400,21 @@ async function processDetectionFrame({ pausedFrame = false } = {}) {
       sourceHeight: result.sourceHeight,
     });
     const activeTrackCount = tracks.filter((track) => track.status === "active").length;
+    const hadBackground = detector.hasBackground;
+    const performanceUpdate = adaptivePerformance.recordFrame({
+      processingTimeMs: result.processingTimeMs,
+      propCount: tracks.length,
+      source: mediaState.source,
+      continuous: !pausedFrame,
+    });
+
+    if (performanceUpdate.changed) {
+      detector.maxProcessingWidth = performanceUpdate.state.maxProcessingWidth;
+      if (hadBackground) {
+        detector.resetBackground();
+        resetBackgroundButton.disabled = true;
+      }
+    }
 
     detectionState.lastResult = result;
     detectionState.detections = result.detections;
@@ -203,14 +423,23 @@ async function processDetectionFrame({ pausedFrame = false } = {}) {
     renderDetectionOverlay();
     publishDetections(result);
 
+    const performanceState = performanceUpdate.state;
     const resolution = `${result.sourceWidth}×${result.sourceHeight} → ${result.processingWidth}×${result.processingHeight}`;
-    const missingBackground = backgroundMethod.checked && !result.backgroundAvailable;
+    const frameRate = performanceState.averageFrameRate
+      ? `${performanceState.averageFrameRate.toFixed(0)} fps`
+      : "warming up";
+    const performanceSummary = `${performanceState.qualityLabel} · ${frameRate}`;
+    const missingBackground =
+      backgroundMethod.checked && (!result.backgroundAvailable || (performanceUpdate.changed && hadBackground));
     const title = pausedFrame ? "Current frame tracked" : "Tracking active";
     const trackingSummary = `${tracks.length} track${tracks.length === 1 ? "" : "s"}`;
     const detail = missingBackground
-      ? `${resolution} · ${result.processingTimeMs.toFixed(1)} ms · ${trackingSummary}. Capture a background reference to use that method.`
-      : `${resolution} · ${result.processingTimeMs.toFixed(1)} ms · ${trackingSummary} · ${result.enabledMethods.join(", ") || "no methods enabled"}.`;
-    updateDetectionStatus(title, detail, pausedFrame ? "Paused frame" : "Tracking");
+      ? `${resolution} · ${result.processingTimeMs.toFixed(1)} ms · ${performanceSummary} · ${trackingSummary}. Capture a background reference to use that method.`
+      : `${resolution} · ${result.processingTimeMs.toFixed(1)} ms · ${performanceSummary} · ${trackingSummary} · ${result.enabledMethods.join(", ") || "no methods enabled"}.`;
+    const stageText = pausedFrame
+      ? "Paused frame"
+      : `Tracking · ${performanceState.qualityLabel.replace(" quality", "")}`;
+    updateDetectionStatus(title, detail, stageText);
   } catch (error) {
     clearCurrentDetections();
     updateDetectionStatus(
@@ -259,17 +488,21 @@ function scheduleDetectionFrame(generation) {
   }
 
   if (typeof mediaView.requestVideoFrameCallback === "function") {
-    detectionState.frameCallbackId = mediaView.requestVideoFrameCallback(async () => {
+    detectionState.frameCallbackId = mediaView.requestVideoFrameCallback(async (now) => {
       detectionState.frameCallbackId = null;
-      await processDetectionFrame();
+      if (adaptivePerformance.shouldProcessFrame(now, mediaState.source)) {
+        await processDetectionFrame();
+      }
       scheduleDetectionFrame(generation);
     });
     return;
   }
 
-  detectionState.animationFrameId = requestAnimationFrame(async () => {
+  detectionState.animationFrameId = requestAnimationFrame(async (now) => {
     detectionState.animationFrameId = null;
-    await processDetectionFrame();
+    if (adaptivePerformance.shouldProcessFrame(now, mediaState.source)) {
+      await processDetectionFrame();
+    }
     scheduleDetectionFrame(generation);
   });
 }
@@ -281,6 +514,7 @@ function startDetectionLoop() {
     return;
   }
 
+  adaptivePerformance.setSource(mediaState.source);
   const generation = detectionState.loopGeneration;
   scheduleDetectionFrame(generation);
 }
@@ -319,4 +553,11 @@ function setSamplingMode(active) {
     ? "Tap inside the visible video image."
     : "Select the button, then tap a visible prop.";
   videoSurface.classList.toggle("is-sampling", active);
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    AdaptivePerformanceController,
+    PERFORMANCE_QUALITY_LEVELS,
+  };
 }
