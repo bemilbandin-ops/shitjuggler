@@ -2,7 +2,7 @@
 
 Browser-based workspace for live and recorded juggling footage.
 
-## Current scope: build step 8
+## Current scope: build step 9
 
 This implementation includes:
 
@@ -28,7 +28,8 @@ This implementation includes:
 - Four visibly different movement-driven effects: neon motion trails, endpoint sparks, orbiting echoes, and path symbols
 - A generic effect interface that shows only controls declared by the selected effect
 - Bounded particle storage and cleanup for stateful effects
-- Existing Balanced, Comet, and Clean lines presets for neon motion trails
+- Four complete presets for every effect, with effect selection, preset selection, and current-setting adjustment kept separate
+- Automatic preset matching so manual control changes are shown as custom settings
 - Local recording of the source video composited with the active effect
 - Source, 1080p, 720p, and 480p export sizing without upscaling smaller footage
 - 30 fps and 60 fps recording choices with browser-selected WebM or MP4 encoding
@@ -77,7 +78,22 @@ Build step 8 expands the independent effect runtime from one complete effect to 
 - **Difference:** typography and symbols rather than a continuous ribbon, particles, or prop copies.
 - **Failure conditions:** marks must not bridge tracking gaps, form an unreadable solid line, persist after cleanup, or grow without bounds.
 
-The effect selector and control panel are generated from effect metadata. Switching effects replaces the controls, clears the previous effect instance, and prevents unrelated settings from being displayed. New effects intentionally have no presets yet; preset expansion remains the next build step.
+The effect selector and control panel are generated from effect metadata. Switching effects replaces the controls, clears the previous effect instance, and prevents unrelated settings from being displayed.
+
+## Effect presets
+
+Build step 9 adds preset collections to effects that already work. Presets only replace control values; they retain the selected effect ID and drawing behavior, so they are not presented as separate effects.
+
+Each effect now has four complete preset looks:
+
+- **Neon motion trails:** Soft silk, Electric band, Heavy paint, and Transparent glass
+- **Endpoint sparks:** Responsive sparks, Ember fall, Firework burst, and Zero gravity
+- **Orbiting echoes:** Balanced orbit, Tight halo, Wide carousel, and Reverse spiral
+- **Path symbols:** Starlight, Kinetic type, Confetti marks, and Upright notes
+
+Every preset declares a value for every control belonging to its effect. The interface separately presents the effect selector, preset selector, and current settings. When the current settings exactly match a preset, its name is selected. Adjusting any control produces a custom variation without creating another effect.
+
+The preset feature is loaded as an independent browser module. It rebuilds the four existing effect definitions with preset metadata while preserving their IDs, renderers, state ownership, and cleanup behavior.
 
 ## Rendered recording and export
 
@@ -127,13 +143,14 @@ Then open `http://localhost:8080`.
 
 ## Validate core logic
 
-The tracker, effect runtime, effect renderers, and recording geometry/format selection have dependency-free Node smoke tests:
+The tracker, effect runtime, effect renderers, preset definitions, and recording geometry/format selection have dependency-free Node smoke tests:
 
 ```bash
 node tracking.test.js
 node effects.test.js
 node motion-trails.test.js
 node additional-effects.test.js
+node presets.test.js
 node recording.test.js
 ```
 
@@ -147,6 +164,7 @@ node recording.test.js
 - Effect instances own their temporary state and release it in `cleanup()`.
 - Trail and symbol renderers respect `breakBefore` history markers and never join separated track segments.
 - Spark particles are capped and expired particles are removed every frame.
+- Presets remain settings bundles under their existing effect and never register as separate effect IDs.
 - Recording requires both `HTMLCanvasElement.captureStream()` and `MediaRecorder`.
 - The downloaded container and codec depend on browser support; WebM is expected in most Chromium and Firefox configurations, while MP4 may be selected where supported.
 - Uploaded-video audio export depends on the browser exposing audio through `HTMLMediaElement.captureStream()`.
