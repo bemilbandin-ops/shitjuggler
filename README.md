@@ -2,7 +2,7 @@
 
 Browser-based workspace for live and recorded juggling footage.
 
-## Current scope: build step 7
+## Current scope: build step 8
 
 This implementation includes:
 
@@ -25,9 +25,10 @@ This implementation includes:
 - Effect-definition validation for unique IDs, effect briefs, movement inputs, controls, presets, and lifecycle hooks
 - Source-to-display coordinate mapping for current tracks and bounded movement history
 - Effect cleanup on switching, unregistering, source changes, seeking, runtime reset, draw failure, and page exit
-- Confidence-aware neon motion trails driven by prop history, speed, size, and position
-- Effect-specific controls for trail length, width, glow, opacity, head size, color response, and visibility
-- Balanced, Comet, and Clean lines presets
+- Four visibly different movement-driven effects: neon motion trails, endpoint sparks, orbiting echoes, and path symbols
+- A generic effect interface that shows only controls declared by the selected effect
+- Bounded particle storage and cleanup for stateful effects
+- Existing Balanced, Comet, and Clean lines presets for neon motion trails
 - Local recording of the source video composited with the active effect
 - Source, 1080p, 720p, and 480p export sizing without upscaling smaller footage
 - 30 fps and 60 fps recording choices with browser-selected WebM or MP4 encoding
@@ -40,19 +41,43 @@ Raw current-frame detections remain available through `window.shitJuggler.getCur
 
 Stable tracked props are available through `window.shitJuggler.getCurrentTracks()`, `window.shitJuggler.getTrackingSnapshot()`, and the `shitjuggler:tracks` event. Each track includes a stable `id`, current position, normalized position, approximate size and length, velocity, speed, movement direction and angle, confidence, status, missed-frame count, contributing detection methods, and bounded recent `history`. History points may include `breakBefore: true` to prevent effects from drawing across a tracking gap.
 
-## Neon motion trails
+## Effect collection
 
-Build step 6 registers and selects `neon-motion-trails`, the first complete effect built on the independent runtime.
+Build step 8 expands the independent effect runtime from one complete effect to four effects with different visual behavior. Each effect supplies a visual brief, movement inputs, controls, drawing behavior, owned state, and cleanup behavior through the existing registry contract.
 
-Approved effect brief:
+### Neon motion trails
 
 - **Visual result:** each tracked prop becomes a bright moving head with a tapered neon ribbon behind it.
 - **Movement connection:** tracked history shapes the ribbon while current position, speed, size, and confidence control its head, width, and visibility.
 - **Behavior:** trails redraw from bounded recent history, fade toward older points, dim predicted tracks, and reset with the effect runtime.
-- **Difference:** the effect converts movement into an expressive light path instead of duplicating detector boxes, IDs, or diagnostics.
+- **Difference:** one connected light path rather than particles, copies, text, detector boxes, or diagnostics.
 - **Failure conditions:** trails must not cross explicit history breaks, retain stale paths after timeline resets, mutate tracking data, or perform unbounded per-frame work.
 
-The interface exposes the effect selector, three presets, and effect-specific controls. Color can remain fixed, vary per tracked prop, or respond to speed. Selecting **No effect** clears the effect canvas without disabling tracking or detection.
+### Endpoint sparks
+
+- **Visual result:** bright particles spray independently from both ends of each tracked prop.
+- **Movement connection:** angle and length place the two emitters; speed and direction influence particle count and velocity.
+- **Behavior:** active confident tracks emit short-lived particles that drift, fall, fade, and remain capped at a fixed maximum.
+- **Difference:** detached ballistic particles rather than a connected trail, repeated copies, or typography.
+- **Failure conditions:** predicted tracks must not emit, particle counts must remain bounded, and cleanup must discard all stored particles.
+
+### Orbiting echoes
+
+- **Visual result:** several luminous copies of the prop revolve around its current position at different radii and scales.
+- **Movement connection:** current position anchors the sculpture while angle, length, confidence, and time shape the copies.
+- **Behavior:** copies rotate locally around each prop and disappear immediately when the track or effect clears.
+- **Difference:** a local moving sculpture made from repeated prop silhouettes rather than history paths, particles, or text.
+- **Failure conditions:** copies must remain local, bounded in number, readable, and unable to hide the performer with a permanent overlay.
+
+### Path symbols
+
+- **Visual result:** custom words or symbols appear as separate readable marks along the recent movement path.
+- **Movement connection:** bounded history sets placement; path direction can orient each mark and confidence controls fading.
+- **Behavior:** marks are recomputed each frame, stop at explicit history breaks, and fade toward older positions.
+- **Difference:** typography and symbols rather than a continuous ribbon, particles, or prop copies.
+- **Failure conditions:** marks must not bridge tracking gaps, form an unreadable solid line, persist after cleanup, or grow without bounds.
+
+The effect selector and control panel are generated from effect metadata. Switching effects replaces the controls, clears the previous effect instance, and prevents unrelated settings from being displayed. New effects intentionally have no presets yet; preset expansion remains the next build step.
 
 ## Rendered recording and export
 
@@ -86,7 +111,7 @@ Effects can be added independently through `window.shitJugglerEffects`:
 - `reset(reason)` clears stored effect data while preserving the selected effect and its current controls.
 - `getState()` returns the selected effect, current controls, last runtime error, and registered metadata.
 
-Every registered effect must provide a unique ID and name, visual description, movement inputs, the required effect brief, effect-specific controls, optional presets, and a `create()` factory. The factory returns an isolated instance with `draw()` and optional `activate()`, `controlsChanged()`, and `cleanup()` lifecycle methods. The runtime maps source coordinates into the contained video rectangle before calling `draw()`.
+Every registered effect must provide a unique ID and name, visual description, movement inputs, the required effect brief, effect-specific controls, optional presets, and a `create()` factory. The factory returns an isolated instance with `draw()` and cleanup lifecycle methods. The runtime maps source coordinates into the contained video rectangle before calling `draw()`.
 
 The runtime listens to `shitjuggler:tracks`, so new effects consume tracking output without modifying detection, tracking, media, playback, or recording code. A failing effect is cleaned up and deselected instead of breaking the frame-processing loop.
 
@@ -102,12 +127,13 @@ Then open `http://localhost:8080`.
 
 ## Validate core logic
 
-The tracker, effect runtime, motion-trail effect, and recording geometry/format selection have dependency-free Node smoke tests:
+The tracker, effect runtime, effect renderers, and recording geometry/format selection have dependency-free Node smoke tests:
 
 ```bash
 node tracking.test.js
 node effects.test.js
 node motion-trails.test.js
+node additional-effects.test.js
 node recording.test.js
 ```
 
@@ -118,8 +144,9 @@ node recording.test.js
 - Background-difference detection works best when the camera is fixed and the reference frame contains no moving props.
 - Detection processing uses only the current frame plus one optional captured background frame.
 - Tracking retains only a short, bounded movement history for each active prop.
-- Effect instances own their temporary state and must release it in `cleanup()`.
-- The neon trail renderer respects `breakBefore` history markers and never joins separated track segments.
+- Effect instances own their temporary state and release it in `cleanup()`.
+- Trail and symbol renderers respect `breakBefore` history markers and never join separated track segments.
+- Spark particles are capped and expired particles are removed every frame.
 - Recording requires both `HTMLCanvasElement.captureStream()` and `MediaRecorder`.
 - The downloaded container and codec depend on browser support; WebM is expected in most Chromium and Firefox configurations, while MP4 may be selected where supported.
 - Uploaded-video audio export depends on the browser exposing audio through `HTMLMediaElement.captureStream()`.
