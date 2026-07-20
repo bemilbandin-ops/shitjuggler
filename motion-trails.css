@@ -1,0 +1,82 @@
+.effect-settings {
+  padding-top: 21px;
+  border-top: 1px solid #242833;
+}
+
+.effect-status-badge {
+  display: inline-flex;
+  min-width: 42px;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid #3f4656;
+  border-radius: 999px;
+  background: #191e28;
+  color: #aeb5c6;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.effect-status-badge.is-active {
+  border-color: rgba(126, 239, 216, 0.45);
+  background: rgba(37, 102, 92, 0.32);
+  color: #a8ffec;
+}
+
+.effect-controls {
+  display: grid;
+  gap: 14px;
+  transition: opacity 150ms ease;
+}
+
+.effect-controls[data-disabled] {
+  opacity: 0.5;
+}
+
+.effect-color-row {
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.effect-color-row .color-control-row {
+  justify-content: flex-start;
+}
+
+.effect-color-row input[type="color"] {
+  width: 100%;
+}
+
+.effect-toggle {
+  padding: 10px 12px;
+  border: 1px solid #2c313d;
+  border-radius: 10px;
+  background: #151922;
+}
+
+.effect-runtime-status {
+  border-left-color: #7068f4;
+}
+
+#effect-status-title {
+  color: #e5e8ee;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+#effect-status-detail {
+  margin-top: 4px;
+  color: #858c9c;
+  font-size: 0.71rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 520px) {
+  .effect-color-row {
+    grid-template-columns: 1fr;
+  }
+}
