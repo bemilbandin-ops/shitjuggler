@@ -5,10 +5,19 @@ const emptyState = document.querySelector("#empty-state");
 const statusDot = document.querySelector("#status-dot");
 const statusTitle = document.querySelector("#status-title");
 const statusDetail = document.querySelector("#status-detail");
+const playbackControls = document.querySelector("#playback-controls");
+const playPauseButton = document.querySelector("#play-pause-button");
+const restartButton = document.querySelector("#restart-button");
+const seekRange = document.querySelector("#seek-range");
+const currentTimeLabel = document.querySelector("#current-time");
+const durationTimeLabel = document.querySelector("#duration-time");
+
+const SEEK_MAX = 1000;
 
 const mediaState = {
   stream: null,
   objectUrl: null,
+  source: "none",
 };
 
 function updateStatus(type, title, detail) {
@@ -29,6 +38,66 @@ function updateStatus(type, title, detail) {
 function showMedia() {
   emptyState.classList.add("is-hidden");
   mediaView.classList.add("is-visible");
+}
+
+function formatTime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return "0:00";
+  }
+
+  const totalSeconds = Math.floor(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+  const paddedSeconds = String(remainingSeconds).padStart(2, "0");
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${paddedSeconds}`;
+  }
+
+  return `${minutes}:${paddedSeconds}`;
+}
+
+function updatePlayPauseButton() {
+  const isPlaying = mediaState.source === "upload" && !mediaView.paused && !mediaView.ended;
+  playPauseButton.textContent = isPlaying ? "Pause" : "Play";
+  playPauseButton.setAttribute("aria-label", isPlaying ? "Pause video" : "Play video");
+  playPauseButton.setAttribute("aria-pressed", String(isPlaying));
+}
+
+function updateTimeline() {
+  const duration = mediaView.duration;
+  const currentTime = mediaView.currentTime;
+
+  currentTimeLabel.textContent = formatTime(currentTime);
+  durationTimeLabel.textContent = formatTime(duration);
+
+  if (!Number.isFinite(duration) || duration <= 0) {
+    seekRange.value = "0";
+    seekRange.disabled = true;
+    return;
+  }
+
+  seekRange.disabled = false;
+  seekRange.value = String(Math.round((currentTime / duration) * SEEK_MAX));
+}
+
+function showPlaybackControls() {
+  playbackControls.hidden = false;
+  updatePlayPauseButton();
+  updateTimeline();
+}
+
+function hidePlaybackControls() {
+  playbackControls.hidden = true;
+}
+
+function resetPlaybackControls() {
+  seekRange.value = "0";
+  seekRange.disabled = true;
+  currentTimeLabel.textContent = "0:00";
+  durationTimeLabel.textContent = "0:00";
+  updatePlayPauseButton();
 }
 
 function stopCameraStream() {
@@ -56,9 +125,11 @@ function resetVideoElement() {
   mediaView.pause();
   mediaView.removeAttribute("src");
   mediaView.srcObject = null;
-  mediaView.controls = false;
   mediaView.muted = false;
   mediaView.load();
+  mediaState.source = "none";
+  hidePlaybackControls();
+  resetPlaybackControls();
 }
 
 function describeCameraError(error) {
@@ -105,12 +176,13 @@ async function startCamera() {
     });
 
     mediaState.stream = stream;
+    mediaState.source = "camera";
     mediaView.srcObject = stream;
     mediaView.muted = true;
-    mediaView.controls = false;
     await mediaView.play();
 
     showMedia();
+    hidePlaybackControls();
     updateStatus("active", "Live camera active", "The camera feed is ready for future tracking work.");
   } catch (error) {
     resetVideoElement();
@@ -135,19 +207,20 @@ function loadUploadedVideo(file) {
   releaseUploadedVideo();
   resetVideoElement();
 
+  mediaState.source = "upload";
   mediaState.objectUrl = URL.createObjectURL(file);
   mediaView.src = mediaState.objectUrl;
-  mediaView.controls = true;
   mediaView.muted = false;
 
   mediaView.addEventListener(
     "loadedmetadata",
     () => {
       showMedia();
+      showPlaybackControls();
       updateStatus(
         "active",
         "Uploaded video ready",
-        `${file.name} is loaded. Use the browser video controls to play it.`,
+        `${file.name} is loaded. Use the playback controls below the video.`,
       );
     },
     { once: true },
@@ -156,6 +229,7 @@ function loadUploadedVideo(file) {
   mediaView.addEventListener(
     "error",
     () => {
+      hidePlaybackControls();
       updateStatus(
         "error",
         "Video could not load",
@@ -168,7 +242,67 @@ function loadUploadedVideo(file) {
   mediaView.load();
 }
 
+async function togglePlayback() {
+  if (mediaState.source !== "upload") {
+    return;
+  }
+
+  if (mediaView.ended) {
+    mediaView.currentTime = 0;
+  }
+
+  if (mediaView.paused) {
+    try {
+      await mediaView.play();
+    } catch {
+      updateStatus("error", "Playback could not start", "The browser blocked or could not start this video.");
+    }
+    return;
+  }
+
+  mediaView.pause();
+}
+
+async function restartPlayback() {
+  if (mediaState.source !== "upload") {
+    return;
+  }
+
+  mediaView.currentTime = 0;
+
+  try {
+    await mediaView.play();
+  } catch {
+    updateTimeline();
+    updatePlayPauseButton();
+  }
+}
+
+function seekPlayback() {
+  if (mediaState.source !== "upload" || !Number.isFinite(mediaView.duration)) {
+    return;
+  }
+
+  mediaView.currentTime = (Number(seekRange.value) / SEEK_MAX) * mediaView.duration;
+  updateTimeline();
+}
+
 cameraButton.addEventListener("click", startCamera);
+playPauseButton.addEventListener("click", togglePlayback);
+restartButton.addEventListener("click", restartPlayback);
+seekRange.addEventListener("input", seekPlayback);
+
+mediaView.addEventListener("play", updatePlayPauseButton);
+mediaView.addEventListener("pause", updatePlayPauseButton);
+mediaView.addEventListener("ended", updatePlayPauseButton);
+mediaView.addEventListener("timeupdate", updateTimeline);
+mediaView.addEventListener("durationchange", updateTimeline);
+
+mediaView.addEventListener("click", () => {
+  if (mediaState.source === "upload") {
+    togglePlayback();
+  }
+});
 
 uploadInput.addEventListener("change", (event) => {
   const [file] = event.target.files;
