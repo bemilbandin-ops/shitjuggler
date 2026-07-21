@@ -211,18 +211,14 @@
     }
   }
 
-  function cloneTrack(track) {
-    return {
-      ...track,
-      direction: track.direction ? { ...track.direction } : undefined,
-      size: track.size ? { ...track.size } : undefined,
-      methods: Array.isArray(track.methods) ? [...track.methods] : [],
-      history: Array.isArray(track.history) ? track.history.map((point) => ({ ...point })) : [],
-    };
-  }
-
   class EffectRuntime {
-    constructor({ registry, canvas, pixelRatioLimit = 2, onError = null } = {}) {
+    constructor({
+      registry,
+      canvas,
+      pixelRatioLimit = 1.5,
+      maxFramesPerSecond = 30,
+      onError = null,
+    } = {}) {
       assertEffect(registry instanceof EffectRegistry, "EffectRuntime requires an EffectRegistry.");
       assertEffect(canvas && typeof canvas.getContext === "function", "EffectRuntime requires a canvas.");
       const context = canvas.getContext("2d");
@@ -232,14 +228,21 @@
       this.canvas = canvas;
       this.context = context;
       this.pixelRatioLimit = Math.max(1, pixelRatioLimit);
+      this.maxFramesPerSecond = clamp(Number(maxFramesPerSecond) || 30, 1, 120);
+      this.minimumFrameIntervalMs = 1000 / this.maxFramesPerSecond;
       this.onError = typeof onError === "function" ? onError : null;
       this.displayWidth = 1;
       this.displayHeight = 1;
       this.pixelRatio = 1;
       this.active = null;
       this.controls = {};
+      this.controlSnapshot = deepFreeze({});
       this.lastTimestamp = null;
+      this.lastRenderClockMs = null;
       this.frameNumber = 0;
+      this.renderedFrames = 0;
+      this.skippedRenderFrames = 0;
+      this.averageRenderTimeMs = null;
       this.lastError = null;
       this.destroyed = false;
       this.unsubscribeRegistry = registry.subscribe((event) => {
@@ -249,26 +252,40 @@
       });
     }
 
+    updateControlSnapshot() {
+      this.controlSnapshot = deepFreeze(clone(this.controls));
+      return this.controlSnapshot;
+    }
+
     resize(width = this.canvas.clientWidth, height = this.canvas.clientHeight, pixelRatio = 1) {
       const safeWidth = Math.max(1, Number(width) || 1);
       const safeHeight = Math.max(1, Number(height) || 1);
       const safeRatio = clamp(Number(pixelRatio) || 1, 1, this.pixelRatioLimit);
       const bitmapWidth = Math.max(1, Math.round(safeWidth * safeRatio));
       const bitmapHeight = Math.max(1, Math.round(safeHeight * safeRatio));
+      const logicalChanged =
+        safeWidth !== this.displayWidth || safeHeight !== this.displayHeight || safeRatio !== this.pixelRatio;
+      const bitmapChanged = this.canvas.width !== bitmapWidth || this.canvas.height !== bitmapHeight;
 
       this.displayWidth = safeWidth;
       this.displayHeight = safeHeight;
       this.pixelRatio = safeRatio;
-      if (this.canvas.width !== bitmapWidth || this.canvas.height !== bitmapHeight) {
+
+      if (bitmapChanged) {
         this.canvas.width = bitmapWidth;
         this.canvas.height = bitmapHeight;
       }
       if (this.canvas.style) {
-        this.canvas.style.width = `${safeWidth}px`;
-        this.canvas.style.height = `${safeHeight}px`;
+        const widthStyle = `${safeWidth}px`;
+        const heightStyle = `${safeHeight}px`;
+        if (this.canvas.style.width !== widthStyle) this.canvas.style.width = widthStyle;
+        if (this.canvas.style.height !== heightStyle) this.canvas.style.height = heightStyle;
       }
-      this.context.setTransform?.(safeRatio, 0, 0, safeRatio, 0, 0);
-      return { width: safeWidth, height: safeHeight, pixelRatio: safeRatio };
+      if (logicalChanged || bitmapChanged) {
+        this.context.setTransform?.(safeRatio, 0, 0, safeRatio, 0, 0);
+      }
+
+      return { width: safeWidth, height: safeHeight, pixelRatio: safeRatio, changed: logicalChanged || bitmapChanged };
     }
 
     clear() {
@@ -282,7 +299,7 @@
         clear: () => this.clear(),
       });
       assertEffect(instance && typeof instance.draw === "function", `Effect "${definition.id}" create() must return an object with draw().`);
-      instance.activate?.({ canvas: this.canvas, context: this.context, controls: clone(this.controls) });
+      instance.activate?.({ canvas: this.canvas, context: this.context, controls: this.controlSnapshot });
       return { definition, instance };
     }
 
@@ -291,6 +308,7 @@
       if (effectId === null || effectId === undefined || effectId === "") {
         this.disposeActive(reason);
         this.controls = {};
+        this.updateControlSnapshot();
         this.clear();
         return this.getState();
       }
@@ -303,8 +321,10 @@
       this.controls = Object.fromEntries(
         definition.controls.map((control) => [control.id, clone(control.defaultValue)]),
       );
+      this.updateControlSnapshot();
       this.active = this.createActive(definition);
       this.lastTimestamp = null;
+      this.lastRenderClockMs = null;
       this.frameNumber = 0;
       this.clear();
       return this.getState();
@@ -319,7 +339,8 @@
         assertEffect(controlMap.has(controlId), `Effect "${this.active.definition.id}" has no control "${controlId}".`);
         this.controls[controlId] = sanitizeControlValue(controlMap.get(controlId), value);
       });
-      this.active.instance.controlsChanged?.(clone(this.controls));
+      this.updateControlSnapshot();
+      this.active.instance.controlsChanged?.(this.controlSnapshot);
       return clone(this.controls);
     }
 
@@ -366,22 +387,28 @@
       });
 
       const tracks = (frame.tracks || []).map((sourceTrack) => {
-        const track = cloneTrack(sourceTrack);
-        const center = mapPoint(track.x || 0, track.y || 0);
-        const width = sourceWidth > 0 ? ((track.width || 0) / sourceWidth) * videoRect.width : 0;
-        const height = sourceHeight > 0 ? ((track.height || 0) / sourceHeight) * videoRect.height : 0;
+        const center = mapPoint(sourceTrack.x || 0, sourceTrack.y || 0);
+        const width = sourceWidth > 0 ? ((sourceTrack.width || 0) / sourceWidth) * videoRect.width : 0;
+        const height = sourceHeight > 0 ? ((sourceTrack.height || 0) / sourceHeight) * videoRect.height : 0;
+        const history = Array.isArray(sourceTrack.history)
+          ? sourceTrack.history.map((point) => ({
+              ...point,
+              display: mapPoint(point.x || 0, point.y || 0),
+            }))
+          : [];
+
         return {
-          ...track,
+          ...sourceTrack,
+          direction: sourceTrack.direction ? { ...sourceTrack.direction } : undefined,
+          size: sourceTrack.size ? { ...sourceTrack.size } : undefined,
+          methods: Array.isArray(sourceTrack.methods) ? [...sourceTrack.methods] : [],
           displayX: center.x,
           displayY: center.y,
           displayWidth: width,
           displayHeight: height,
           displayLength: Math.max(width, height),
           display: { x: center.x, y: center.y, width, height, length: Math.max(width, height) },
-          history: track.history.map((point) => ({
-            ...point,
-            display: mapPoint(point.x || 0, point.y || 0),
-          })),
+          history,
         };
       });
 
@@ -402,6 +429,12 @@
       };
     }
 
+    getRenderClockMs(frame) {
+      if (Number.isFinite(frame.timestamp)) return frame.timestamp * 1000;
+      if (typeof performance !== "undefined" && typeof performance.now === "function") return performance.now();
+      return Date.now();
+    }
+
     render(frame = {}) {
       if (this.destroyed) return false;
       if (!this.active) {
@@ -409,6 +442,20 @@
         return false;
       }
 
+      const renderClockMs = this.getRenderClockMs(frame);
+      if (
+        frame.forceRender !== true &&
+        this.lastRenderClockMs !== null &&
+        renderClockMs - this.lastRenderClockMs < this.minimumFrameIntervalMs
+      ) {
+        this.skippedRenderFrames += 1;
+        return false;
+      }
+      this.lastRenderClockMs = renderClockMs;
+
+      const startedAt = typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
       const preparedFrame = this.prepareFrame(frame);
       if (this.active.definition.clearBeforeDraw) this.clear();
 
@@ -417,10 +464,18 @@
         this.active.instance.draw(preparedFrame, {
           canvas: this.canvas,
           context: this.context,
-          controls: clone(this.controls),
+          controls: this.controlSnapshot,
           clear: () => this.clear(),
         });
         this.context.restore();
+        const finishedAt = typeof performance !== "undefined" && typeof performance.now === "function"
+          ? performance.now()
+          : Date.now();
+        const renderTimeMs = Math.max(0, finishedAt - startedAt);
+        this.averageRenderTimeMs = this.averageRenderTimeMs === null
+          ? renderTimeMs
+          : this.averageRenderTimeMs * 0.85 + renderTimeMs * 0.15;
+        this.renderedFrames += 1;
         this.lastError = null;
         return true;
       } catch (error) {
@@ -433,6 +488,7 @@
         const failedEffectId = this.active.definition.id;
         this.disposeActive("draw-error");
         this.controls = {};
+        this.updateControlSnapshot();
         this.clear();
         this.onError?.(this.lastError, failedEffectId);
         return false;
@@ -442,6 +498,7 @@
     reset(reason = "runtime-reset") {
       if (!this.active) {
         this.lastTimestamp = null;
+        this.lastRenderClockMs = null;
         this.frameNumber = 0;
         this.clear();
         return this.getState();
@@ -451,8 +508,10 @@
       const preservedControls = clone(this.controls);
       this.disposeActive(reason);
       this.controls = preservedControls;
+      this.updateControlSnapshot();
       this.active = this.createActive(definition);
       this.lastTimestamp = null;
+      this.lastRenderClockMs = null;
       this.frameNumber = 0;
       this.clear();
       return this.getState();
@@ -464,7 +523,7 @@
         reason,
         canvas: this.canvas,
         context: this.context,
-        controls: clone(this.controls),
+        controls: this.controlSnapshot,
       });
       this.active = null;
     }
@@ -474,6 +533,16 @@
         selectedEffectId: this.active?.definition.id || null,
         controls: clone(this.controls),
         lastError: this.lastError?.message || null,
+      };
+    }
+
+    getPerformanceState() {
+      return {
+        maxFramesPerSecond: this.maxFramesPerSecond,
+        pixelRatio: this.pixelRatio,
+        renderedFrames: this.renderedFrames,
+        skippedRenderFrames: this.skippedRenderFrames,
+        averageRenderTimeMs: this.averageRenderTimeMs,
       };
     }
 
@@ -512,6 +581,8 @@
     const runtime = new EffectRuntime({
       registry,
       canvas,
+      pixelRatioLimit: 1.5,
+      maxFramesPerSecond: 30,
       onError(error, effectId) {
         window.dispatchEvent(
           new CustomEvent("shitjuggler:effecterror", {
@@ -523,9 +594,23 @@
 
     let lastSource = null;
     let lastMediaTime = null;
+    let resizeFrameId = null;
+
     const resize = () => {
+      resizeFrameId = null;
       const bounds = videoSurface.getBoundingClientRect();
-      runtime.resize(bounds.width, bounds.height, Math.min(window.devicePixelRatio || 1, 2));
+      const area = bounds.width * bounds.height;
+      const densityLimit = area > 900000 ? 1.25 : 1.5;
+      runtime.resize(bounds.width, bounds.height, Math.min(window.devicePixelRatio || 1, densityLimit));
+    };
+
+    const scheduleResize = () => {
+      if (resizeFrameId !== null) return;
+      if (typeof requestAnimationFrame === "function") {
+        resizeFrameId = requestAnimationFrame(resize);
+      } else {
+        resize();
+      }
     };
 
     const resetForMediaChange = () => {
@@ -549,19 +634,18 @@
 
       lastSource = source;
       lastMediaTime = mediaTime;
-      resize();
       runtime.render({
         ...detail,
         timestamp: typeof performance !== "undefined" ? performance.now() / 1000 : Date.now() / 1000,
       });
     });
 
-    window.addEventListener("resize", resize);
+    window.addEventListener("resize", scheduleResize);
     window.addEventListener("pagehide", () => runtime.destroy(), { once: true });
     const mediaView = document.querySelector("#media-view");
     mediaView?.addEventListener("seeking", resetForMediaChange);
     mediaView?.addEventListener("emptied", resetForMediaChange);
-    if (typeof ResizeObserver === "function") new ResizeObserver(resize).observe(videoSurface);
+    if (typeof ResizeObserver === "function") new ResizeObserver(scheduleResize).observe(videoSurface);
     resize();
 
     const api = Object.freeze({
@@ -585,6 +669,7 @@
       applyPreset: (presetId) => runtime.applyPreset(presetId),
       reset: (reason) => runtime.reset(reason),
       getState: () => ({ ...runtime.getState(), effects: registry.list() }),
+      getPerformanceState: () => runtime.getPerformanceState(),
     });
 
     window.shitJugglerEffects = api;
